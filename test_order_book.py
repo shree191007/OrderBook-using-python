@@ -120,5 +120,27 @@ class TestOrderBook(unittest.TestCase):
             self.assertLess(bb, ba)
 
 
+class TestThroughput(unittest.TestCase):
+    def test_engine_processes_over_1m_orders_per_sec(self):
+        import time
+
+        from order_book import random_order
+
+        n = 500_000
+        # generation is excluded from the timed region
+        orders = [random_order(i) for i in range(1, n + 1)]
+        ob = OrderBook()
+        add_order = ob.add_order
+
+        start = time.perf_counter()
+        for order in orders:
+            add_order(order)
+        ops = n / (time.perf_counter() - start)
+
+        self.assertGreater(
+            ops, 1_000_000, f"engine throughput {ops:,.0f}/s below 1M/s target"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
