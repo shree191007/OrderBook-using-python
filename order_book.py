@@ -3,8 +3,9 @@ from bisect import insort
 from collections import deque
 import random
 import time
+
 '''
-order class with two types of orders: buy and sell 
+order class with two types of orders: buy and sell
 both orders are Limit orders
 '''
 @dataclass
@@ -18,19 +19,26 @@ class Order:
 '''
 has methods to add, cancel orders, get best bid/ask and print the order book
 also has private methods to match buy/sell orders and add orders to the book
+
+Price levels are stored as deques keyed by price for FIFO (time priority).
+Both price lists are kept sorted ascending with bisect.insort:
+    - best ask is the first element  (lowest sell price)
+    - best bid is the last element   (highest buy price)
+Cancellation is O(1): the order is looked up via order_map and marked filled
+(quantity 0); the now-dead entry is pruned lazily during matching/inspection.
 '''
 class OrderBook:
     def __init__(self):
         self.bids = {}
         self.asks = {}
 
+        # both lists kept sorted ascending via bisect.insort
         self.bid_prices = []
         self.ask_prices = []
 
         self.order_map = {}
 
-
-    #adding an order
+    # adding an order
     def add_order(self, order: Order):
         if order.side == "buy":
             self._match_buy(order)
@@ -43,26 +51,17 @@ class OrderBook:
             self._add_to_book(order)
 
     def cancel_order(self, order_id: int):
-        if order_id not in self.order_map:
-            return
-
-        side, price = self.order_map.pop(order_id)
-        book = self.bids if side == "buy" else self.asks
-        prices = self.bid_prices if side == "buy" else self.ask_prices
-
-        queue = book[price]
-        queue = deque(o for o in queue if o.order_id != order_id)
-
-        if queue:
-            book[price] = queue
-        else:
-            del book[price]
-            prices.remove(price)
+        order = self.order_map.pop(order_id, None)
+        if order is not None:
+            # lazy cancellation: mark dead, prune later. O(1).
+            order.quantity = 0
 
     def best_bid(self):
-        return self.bid_prices[0] if self.bid_prices else None
+        self._prune_back(self.bids, self.bid_prices)
+        return self.bid_prices[-1] if self.bid_prices else None
 
     def best_ask(self):
+        self._prune_front(self.asks, self.ask_prices)
         return self.ask_prices[0] if self.ask_prices else None
 
     def print_book(self):
@@ -71,21 +70,49 @@ class OrderBook:
         print("\nAsks (price ↑):")
         for p in self.ask_prices:
             total = sum(o.quantity for o in self.asks[p])
-            print(f"{p:.2f} -> {total}")
+            if total:
+                print(f"{p:.2f} -> {total}")
 
         print("\nBids (price ↓):")
-        for p in self.bid_prices:
+        for p in reversed(self.bid_prices):
             total = sum(o.quantity for o in self.bids[p])
-            print(f"{p:.2f} -> {total}")
+            if total:
+                print(f"{p:.2f} -> {total}")
 
+    # --- pruning helpers -------------------------------------------------
+    # Drop cancelled/empty orders (quantity 0) and remove empty price levels.
+    def _prune_front(self, book, prices):
+        while prices:
+            price = prices[0]
+            queue = book[price]
+            while queue and queue[0].quantity == 0:
+                self.order_map.pop(queue[0].order_id, None)
+                queue.popleft()
+            if queue:
+                return
+            del book[price]
+            prices.pop(0)
 
+    def _prune_back(self, book, prices):
+        while prices:
+            price = prices[-1]
+            queue = book[price]
+            while queue and queue[0].quantity == 0:
+                self.order_map.pop(queue[0].order_id, None)
+                queue.popleft()
+            if queue:
+                return
+            del book[price]
+            prices.pop()
 
-
-
+    # --- matching --------------------------------------------------------
     def _match_buy(self, order: Order):
-        while self.ask_prices and order.quantity > 0:
-            best_ask = self.ask_prices[0]
+        while order.quantity > 0:
+            self._prune_front(self.asks, self.ask_prices)
+            if not self.ask_prices:
+                break
 
+            best_ask = self.ask_prices[0]
             if order.price < best_ask:
                 break
 
@@ -99,15 +126,17 @@ class OrderBook:
             if resting.quantity == 0:
                 queue.popleft()
                 self.order_map.pop(resting.order_id, None)
-
                 if not queue:
                     del self.asks[best_ask]
                     self.ask_prices.pop(0)
 
     def _match_sell(self, order: Order):
-        while self.bid_prices and order.quantity > 0:
-            best_bid = self.bid_prices[0]
+        while order.quantity > 0:
+            self._prune_back(self.bids, self.bid_prices)
+            if not self.bid_prices:
+                break
 
+            best_bid = self.bid_prices[-1]
             if order.price > best_bid:
                 break
 
@@ -121,12 +150,9 @@ class OrderBook:
             if resting.quantity == 0:
                 queue.popleft()
                 self.order_map.pop(resting.order_id, None)
-
                 if not queue:
                     del self.bids[best_bid]
-                    self.bid_prices.pop(0)
-
-
+                    self.bid_prices.pop()
 
     def _add_to_book(self, order: Order):
         if order.side == "buy":
@@ -140,12 +166,8 @@ class OrderBook:
             book[order.price] = deque()
             insort(prices, order.price)
 
-            if order.side == "buy":
-
-                prices.sort(reverse=True)
-
         book[order.price].append(order)
-        self.order_map[order.order_id] = (order.side, order.price)
+        self.order_map[order.order_id] = order
 
 
 # =========================
@@ -177,12 +199,9 @@ def stress_test(num_orders=100_000):
     elapsed = end - start
     ops = num_orders / elapsed
 
-
     print(f"no of Orders processed : {num_orders}")
     print(f"Time taken       : {elapsed:.4f} seconds")
     print(f"Orders per second  : {ops:,.5f}")
-
-
 
 
 if __name__ == "__main__":

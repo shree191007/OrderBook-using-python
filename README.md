@@ -12,10 +12,10 @@ Built to be simple, fast, and educational without pretending Python is C++.
   Orders are matched first by best price, then by arrival time.
 
 * **Efficient Data Structures**
-  Uses `collections.deque` for *O(1)* FIFO execution and `bisect` to maintain sorted price levels.
+  Uses `collections.deque` for *O(1)* FIFO execution and `bisect.insort` to maintain sorted price levels.
 
-* **Constant-Time Order Tracking**
-  Internal order map enables *O(1)* lookups and efficient cancellations.
+* **Constant-Time Cancellation**
+  An internal order map enables *O(1)* lookups and *O(1)* cancellation via lazy deletion: a cancelled order is marked dead and pruned during later matching/inspection.
 
 * **High-Volume Stress Testing**
   Built-in simulation benchmarks the engine with **1,000,000+ orders**.
@@ -45,6 +45,8 @@ The order book enforces fairness and determinism using:
 * **Time Priority**
   Each price level stores orders in a `deque`, ensuring FIFO execution.
 
+Both price lists are kept sorted ascending with `bisect.insort`. The best ask is the first element (lowest sell price) and the best bid is the last element (highest buy price).
+
 ---
 
 ## Architecture Overview
@@ -53,8 +55,8 @@ The order book enforces fairness and determinism using:
 OrderBook
  ├── bids: dict[price -> deque[Order]]
  ├── asks: dict[price -> deque[Order]]
- ├── bid_prices: sorted list (descending)
- ├── ask_prices: sorted list (ascending)
+ ├── bid_prices: sorted list (ascending; best bid = last element)
+ ├── ask_prices: sorted list (ascending; best ask = first element)
  └── order_map: dict[order_id -> Order]
 ```
 
@@ -82,7 +84,7 @@ This layout ensures:
 Designed for **high throughput** on standard hardware:
 
 * **Order Capacity:** 1,000,000+ orders
-* **Throughput:** ~480,000 orders/sec
+* **Throughput:** ~450,000 orders/sec
 
 Performance scales linearly with order volume and remains stable under stress tests.
 
@@ -130,9 +132,19 @@ The engine includes a built-in stress test that:
 
 * Generates randomized buy/sell orders
 * Measures matching throughput
-* Validates correctness under load
 
 Ideal for experimentation and optimization.
+
+---
+
+## Tests
+
+Correctness is covered by a `unittest` suite (price/time priority, partial fills,
+multi-level crossing, and cancellation). Run it with:
+
+```bash
+python -m unittest test_order_book -v
+```
 
 ---
 
