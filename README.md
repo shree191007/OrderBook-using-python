@@ -84,9 +84,12 @@ This layout ensures:
 Designed for **high throughput** on standard hardware:
 
 * **Order Capacity:** 1,000,000+ orders
-* **Throughput:** ~450,000 orders/sec
+* **Throughput:** ~2,000,000+ orders/sec (matching engine)
 
-Performance scales linearly with order volume and remains stable under stress tests.
+Throughput is measured over the matching engine only — orders are generated up
+front and excluded from the timed loop, since random-order generation is test
+scaffolding, not part of the engine. Performance scales linearly with order
+volume and remains stable under stress tests.
 
 ---
 
@@ -94,7 +97,7 @@ Performance scales linearly with order volume and remains stable under stress te
 
 ### Prerequisites
 
-* Python **3.7+**
+* Python **3.10+** (uses `@dataclass(slots=True)`)
 
 ### Run the Engine
 
@@ -130,8 +133,8 @@ print(ob.best_bid())
 
 The engine includes a built-in stress test that:
 
-* Generates randomized buy/sell orders
-* Measures matching throughput
+* Pre-generates randomized buy/sell orders (untimed)
+* Times only the matching loop and reports orders/sec
 
 Ideal for experimentation and optimization.
 

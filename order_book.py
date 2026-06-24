@@ -8,7 +8,7 @@ import time
 order class with two types of orders: buy and sell
 both orders are Limit orders
 '''
-@dataclass
+@dataclass(slots=True)
 class Order:
     order_id: int
     side: str
@@ -106,53 +106,65 @@ class OrderBook:
             prices.pop()
 
     # --- matching --------------------------------------------------------
+    # Hot paths: opposite-side book/price-list/order_map are bound to locals
+    # to avoid repeated attribute lookups in the inner loop.
     def _match_buy(self, order: Order):
+        asks = self.asks
+        ask_prices = self.ask_prices
+        order_map = self.order_map
         while order.quantity > 0:
-            self._prune_front(self.asks, self.ask_prices)
-            if not self.ask_prices:
+            self._prune_front(asks, ask_prices)
+            if not ask_prices:
                 break
 
-            best_ask = self.ask_prices[0]
+            best_ask = ask_prices[0]
             if order.price < best_ask:
                 break
 
-            queue = self.asks[best_ask]
+            queue = asks[best_ask]
             resting = queue[0]
 
-            trade_qty = min(order.quantity, resting.quantity)
-            order.quantity -= trade_qty
-            resting.quantity -= trade_qty
+            oq = order.quantity
+            rq = resting.quantity
+            trade_qty = oq if oq < rq else rq
+            order.quantity = oq - trade_qty
+            resting.quantity = rq - trade_qty
 
             if resting.quantity == 0:
                 queue.popleft()
-                self.order_map.pop(resting.order_id, None)
+                order_map.pop(resting.order_id, None)
                 if not queue:
-                    del self.asks[best_ask]
-                    self.ask_prices.pop(0)
+                    del asks[best_ask]
+                    ask_prices.pop(0)
 
     def _match_sell(self, order: Order):
+        bids = self.bids
+        bid_prices = self.bid_prices
+        order_map = self.order_map
         while order.quantity > 0:
-            self._prune_back(self.bids, self.bid_prices)
-            if not self.bid_prices:
+            self._prune_back(bids, bid_prices)
+            if not bid_prices:
                 break
 
-            best_bid = self.bid_prices[-1]
+            best_bid = bid_prices[-1]
             if order.price > best_bid:
                 break
 
-            queue = self.bids[best_bid]
+            queue = bids[best_bid]
             resting = queue[0]
 
-            trade_qty = min(order.quantity, resting.quantity)
-            order.quantity -= trade_qty
-            resting.quantity -= trade_qty
+            oq = order.quantity
+            rq = resting.quantity
+            trade_qty = oq if oq < rq else rq
+            order.quantity = oq - trade_qty
+            resting.quantity = rq - trade_qty
 
             if resting.quantity == 0:
                 queue.popleft()
-                self.order_map.pop(resting.order_id, None)
+                order_map.pop(resting.order_id, None)
                 if not queue:
-                    del self.bids[best_bid]
-                    self.bid_prices.pop()
+                    del bids[best_bid]
+                    bid_prices.pop()
 
     def _add_to_book(self, order: Order):
         if order.side == "buy":
@@ -185,23 +197,24 @@ def random_order(order_id, mid_price=100.0, spread=5.0, max_qty=10):
 
     return Order(order_id, side, price, quantity)
 
-def stress_test(num_orders=100_000):
+def stress_test(num_orders=1_000_000):
     ob = OrderBook()
 
+    # Generate the orders up front so the benchmark measures the matching
+    # engine itself, not the (much slower) random-order generation.
+    orders = [random_order(i) for i in range(1, num_orders + 1)]
+
+    add_order = ob.add_order
     start = time.perf_counter()
+    for order in orders:
+        add_order(order)
+    elapsed = time.perf_counter() - start
 
-    for i in range(1, num_orders + 1):
-        order = random_order(i)
-        ob.add_order(order)
-
-    end = time.perf_counter()
-
-    elapsed = end - start
     ops = num_orders / elapsed
 
     print(f"no of Orders processed : {num_orders}")
     print(f"Time taken       : {elapsed:.4f} seconds")
-    print(f"Orders per second  : {ops:,.5f}")
+    print(f"Orders per second  : {ops:,.2f}")
 
 
 if __name__ == "__main__":
